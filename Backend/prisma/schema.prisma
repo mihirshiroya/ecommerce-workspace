@@ -1,0 +1,57 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String    @id @default(cuid())
+  email             String    @unique
+  password          String?   // Optional for Google OAuth users
+  firstName         String
+  lastName          String
+  isEmailVerified   Boolean   @default(false)
+  isActive          Boolean   @default(true)
+  role              UserRole  @default(USER)
+  provider          AuthProvider @default(LOCAL)
+  googleId          String?   @unique
+  avatar            String?
+  lastLoginAt       DateTime?
+  emailVerifiedAt   DateTime?
+  passwordResetToken String?
+  passwordResetExpires DateTime?
+  emailVerificationToken String?
+  refreshTokens     RefreshToken[]
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("refresh_tokens")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+  MODERATOR
+}
+
+enum AuthProvider {
+  LOCAL
+  GOOGLE
+}

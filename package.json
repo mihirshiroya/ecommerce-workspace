@@ -1,0 +1,19 @@
+{
+  "name": "listing-studio",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.11.0",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "pnpm --dir Frontend build",
+    "test": "node --env-file-if-exists=.env.development.local --test tests/*.test.cjs",
+    "templates:build": "node scripts/build-templates.cjs",
+    "worker:check": "wrangler deploy --dry-run",
+    "deploy": "pnpm build && wrangler deploy"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.10",
+    "wrangler": "^4.0.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  }
+}
