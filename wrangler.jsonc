@@ -13,3 +13,4 @@
   "observability": { "enabled": true },
   "vars": { "NODE_ENV": "production", "APP_NAME": "Listing Studio" },
 }
+
