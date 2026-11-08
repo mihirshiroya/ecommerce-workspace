@@ -514,7 +514,7 @@ function ListingEditor({
                         {a.name}
                       </FieldLabel>
                       <FieldDescription>
-                        {a.seller_id || "No seller ID"} ·{" "}
+                        {a.seller_id || "Account ID not set"} ·{" "}
                         {a.business_name || marketplaces[a.marketplace]}
                       </FieldDescription>
                     </div>

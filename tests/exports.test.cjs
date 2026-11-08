@@ -1,7 +1,55 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createHash, randomUUID } = require("node:crypto");
-const { materializeExport } = require("../Backend/services/exports");
+const { materializeExport, exportFilename } = require("../Backend/services/exports");
+
+test("Flipkart filenames use marketplace slugs, seller ID, IST timestamp and unique request IDs", () => {
+  const account = { name: "Seller account", seller_id: "64379028e72c46a6" };
+  const now = new Date("2026-11-08T05:27:00Z");
+  for (const [category, slug] of Object.entries({
+    mangalsutra: "mangalsutra-tanmaniya",
+    ring: "ring",
+    pendant: "pendant-locket",
+    earring: "earring",
+    "toe-ring": "toe-ring",
+  })) {
+    const template = { marketplace: "flipkart", category, version: "v1" };
+    const filename = exportFilename(template, account, randomUUID(), now);
+    assert.match(filename, new RegExp(`^C_${slug}_64379028e72c46a6_0811-1057FK_REQ[A-Z0-9]{11}\\.xlsx$`));
+    assert.notEqual(exportFilename(template, account, randomUUID(), now), filename);
+  }
+});
+
+test("Flipkart timestamps roll over at midnight in India", () => {
+  assert.match(
+    exportFilename(
+      { marketplace: "flipkart", category: "ring" },
+      { name: "Seller", seller_id: "seller123" },
+      randomUUID(),
+      new Date("2026-11-08T18:30:00Z"),
+    ),
+    /_0911-0000FK_REQ/,
+  );
+});
+
+test("Flipkart exports require a safe seller ID rather than silently using account names", () => {
+  for (const seller_id of ["", "../seller", 'seller"\r\n'])
+    assert.throws(
+      () => exportFilename({ marketplace: "flipkart", category: "ring" }, { name: "Seller", seller_id }, randomUUID()),
+      { status: 422 },
+    );
+});
+
+test("Meesho filenames retain their existing format", () => {
+  assert.equal(
+    exportFilename(
+      { marketplace: "meesho", category: "ring", version: "v2" },
+      { name: "My Shop", seller_id: "" },
+      "12345678-1111-2222-3333-444444444444",
+    ),
+    "My_Shop_ring_v2_12345678.xlsx",
+  );
+});
 const { registry } = require("../Backend/services/workbooks");
 
 process.env.NODE_ENV = "production";

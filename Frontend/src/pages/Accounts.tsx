@@ -132,7 +132,7 @@ export default function Accounts() {
           <Search size={16} />
           <Input
             aria-label="Search accounts"
-            placeholder="Search accounts or seller IDs…"
+            placeholder="Search accounts or account IDs…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
@@ -191,7 +191,7 @@ export default function Accounts() {
                 <TableRow>
                   <TableHead>Account</TableHead>
                   <TableHead>Marketplace</TableHead>
-                  <TableHead>Seller ID</TableHead>
+                  <TableHead>Account ID</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -302,9 +302,16 @@ export default function Accounts() {
               </div>
               <TextField
                 id="seller-id"
-                label="Seller ID"
+                label={`${marketplaces[form.marketplace]} Account ID`}
                 value={form.seller_id}
                 onChange={(v) => field("seller_id", v)}
+                required
+                placeholder={`Enter your ${marketplaces[form.marketplace]} account ID`}
+                description={
+                  form.marketplace === "flipkart"
+                    ? "Enter the seller/account ID from Flipkart Seller Hub. This ID is used in your Excel filenames. Use letters, numbers, underscores or hyphens."
+                    : `Enter the seller/account ID from your ${marketplaces[form.marketplace]} seller account, not your login email or password.`
+                }
               />
               <TextField
                 id="business-name"

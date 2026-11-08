@@ -83,11 +83,29 @@ test(
               200,
             );
             assert.equal((await call("/users", { token: a })).status, 403);
+            for (const marketplace of ["amazon", "flipkart", "meesho"]) {
+              for (const seller_id of [undefined, "   "]) {
+                const rejected = await call("/workspace/accounts", {
+                  method: "POST",
+                  token: a,
+                  data: { name: "Missing account ID", marketplace, seller_id },
+                });
+                assert.equal(rejected.status, 400);
+                assert.ok(
+                  rejected.body.errors.some((e) => e.field === "seller_id"),
+                );
+              }
+            }
             const acc = async (name) =>
               call("/workspace/accounts", {
                 method: "POST",
                 token: a,
-                data: { name, marketplace: "meesho", status: "active" },
+                data: {
+                  name,
+                  marketplace: "meesho",
+                  seller_id: `account-${suffix}`,
+                  status: "active",
+                },
               });
             const aa = await acc("Rollback account A"),
               ab = await acc("Rollback account B");

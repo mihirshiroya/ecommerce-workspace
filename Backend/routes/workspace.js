@@ -26,7 +26,7 @@ const {
   validateRows,
   safePublicUrl,
 } = require("../services/workbooks");
-const { materializeExport } = require("../services/exports");
+const { materializeExport, exportFilename } = require("../services/exports");
 router.get("/templates", (_, res) =>
   res.json({ success: true, data: registry }),
 );
@@ -47,16 +47,27 @@ const category = z.enum([
   "mangalsutra",
   "toe-ring",
 ]);
-const accountSchema = z.object({
-  marketplace: z.enum(["meesho", "flipkart", "amazon"]),
-  name: short.min(1),
-  seller_id: short.default(""),
-  business_name: short.default(""),
-  contact_email: z.union([z.email(), z.literal("")]).default(""),
-  address: text.default(""),
-  notes: text.default(""),
-  status: z.enum(["active", "inactive"]).default("active"),
-});
+const accountSchema = z
+  .object({
+    marketplace: z.enum(["meesho", "flipkart", "amazon"]),
+    name: short.min(1),
+    seller_id: short.min(1, "Account ID is required."),
+    business_name: short.default(""),
+    contact_email: z.union([z.email(), z.literal("")]).default(""),
+    address: text.default(""),
+    notes: text.default(""),
+    status: z.enum(["active", "inactive"]).default("active"),
+  })
+  .refine(
+    (account) =>
+      account.marketplace !== "flipkart" ||
+      /^[a-zA-Z0-9_-]+$/.test(account.seller_id),
+    {
+      path: ["seller_id"],
+      message:
+        "Flipkart Account ID must contain only letters, numbers, underscores or hyphens.",
+    },
+  );
 const imageSchema = z
   .string()
   .max(2048)
@@ -652,10 +663,13 @@ router.post("/history/:id/retry", async (req, res) => {
     draft_id: previous.draft_id,
     account_id: previous.account_id,
     batch_id: previous.batch_id,
-    filename: previous.filename.replace(
-      /_[a-f0-9]{8}\.xlsx$/,
-      `_${id.slice(0, 8)}.xlsx`,
-    ),
+    filename:
+      template.marketplace === "flipkart"
+        ? exportFilename(template, account, id)
+        : previous.filename.replace(
+            /_[a-f0-9]{8}\.xlsx$/,
+            `_${id.slice(0, 8)}.xlsx`,
+          ),
     template_key: previous.template_key,
     template_hash: previous.template_hash,
     snapshot: { ...snapshot, retryOf: previous.id },
@@ -696,7 +710,7 @@ router.post("/drafts/:id/export", async (req, res) => {
         draft_id: draft.id,
         account_id: f.account.id,
         batch_id: batchId,
-        filename: `${f.account.name.replace(/[^a-zA-Z0-9_-]/g, "_")}_${result.template.category}_${result.template.version}_${id.slice(0, 8)}.xlsx`,
+        filename: exportFilename(result.template, f.account, id),
         template_key: draft.template_key,
         template_hash: result.template.templateHash,
         snapshot: {
