@@ -95,7 +95,7 @@ const draftData = z.object({
     .array(
       z.object({
         id: uuid,
-        globalSkuId: uuid,
+        globalSkuId: uuid.optional(),
         values: fieldValues,
         overrides: z
           .record(
@@ -443,11 +443,15 @@ async function resolve(user, payload) {
     )
   )
     fail(422, "Select active accounts for the template marketplace.");
-  const ids = [...new Set(data.products.map((p) => p.globalSkuId))];
-  const catalog = await db
-    .select()
-    .from(skus)
-    .where(and(eq(skus.user_id, user), inArray(skus.id, ids)));
+  const ids = [
+    ...new Set(data.products.map((p) => p.globalSkuId).filter(Boolean)),
+  ];
+  const catalog = ids.length
+    ? await db
+        .select()
+        .from(skus)
+        .where(and(eq(skus.user_id, user), inArray(skus.id, ids)))
+    : [];
   if (
     catalog.length !== ids.length ||
     catalog.some((s) => s.category !== template.category)
@@ -498,8 +502,11 @@ async function resolve(user, payload) {
     account,
     rows: data.products.map((p) => {
       const product = catalog.find((s) => s.id === p.globalSkuId);
-      const values = { ...product.attributes };
-      for (const field of template.fields) {
+      const values = Object.fromEntries(
+        template.fields.filter((f) => f.default).map((f) => [f.id, f.default]),
+      );
+      if (product) Object.assign(values, product.attributes);
+      for (const field of product ? template.fields : []) {
         if (/^product name$/i.test(field.label))
           values[field.id] = product.name;
         else if (/supplier.*sku|sku.*id|^sku$/i.test(field.label))
@@ -528,6 +535,20 @@ async function resolve(user, payload) {
         for (const f of template.fields)
           if (/supplier.*sku|sku.*id|^sku$/i.test(f.label))
             values[f.id] = m.account_sku;
+      }
+      for (const f of template.fields) {
+        if (values[f.id] !== undefined && String(values[f.id]).trim() !== "")
+          continue;
+        const fallback = /^(manufacturer|packer) name$/i.test(f.label)
+          ? account.business_name
+          : /^(manufacturer|packer) address$/i.test(f.label)
+            ? account.address
+            : /^(manufacturer|packer) details$/i.test(f.label)
+              ? [account.business_name, account.address]
+                  .filter(Boolean)
+                  .join(", ")
+              : "";
+        if (fallback) values[f.id] = fallback;
       }
       return values;
     }),

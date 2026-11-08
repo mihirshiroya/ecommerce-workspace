@@ -47,6 +47,9 @@ export interface TemplateField {
   integer?: boolean;
   minimum?: number;
   maxLength?: number;
+  default?: string;
+  dynamic?: boolean;
+  formula?: boolean;
   group: string;
 }
 export interface Template {
@@ -65,7 +68,7 @@ export interface Template {
 export type Values = Record<string, string | number | boolean>;
 export interface ProductEntry {
   id: string;
-  globalSkuId: string;
+  globalSkuId?: string;
   values: Values;
   overrides: Record<string, { mappingId?: string; values: Values }>;
 }

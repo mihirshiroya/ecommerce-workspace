@@ -50,7 +50,6 @@ import {
   ErrorState,
 } from "../components/workspace/Common";
 import SchemaFields from "../components/workspace/SchemaFields";
-import SkuEditor from "../components/workspace/SkuEditor";
 import { fetcher, save, errorMessage, downloadFile } from "../api/workspace";
 import api from "../api/config";
 import {
@@ -69,13 +68,14 @@ import {
   type Values,
 } from "../types/workspace";
 import { cn } from "@/lib/utils";
-const steps = [
-  "Template",
-  "Accounts",
-  "Products",
-  "Details",
-  "Review & export",
-];
+const steps = ["Template", "Accounts", "Details", "Review & export"];
+function versionsFor(templates: Template[], p: Marketplace, c: Category) {
+  const list = templates
+    .filter((t) => t.marketplace === p && t.category === c)
+    .map((t) => t.version)
+    .sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+  return list.length ? [...new Set(list)] : ["v1"];
+}
 export default function BulkListing() {
   const [params] = useSearchParams();
   const id = params.get("draft");
@@ -123,7 +123,7 @@ function ListingEditor({
   recent: Draft[];
 }) {
   const { mutate } = useSWRConfig();
-  const [step, setStep] = useState(initial ? 3 : 0),
+  const [step, setStep] = useState(initial ? 2 : 0),
     [platform, setPlatform] = useState<Marketplace>(
       (initial?.template_key.split(":")[0] as Marketplace) || "meesho",
     ),
@@ -140,7 +140,6 @@ function ListingEditor({
     [saved, setSaved] = useState<Draft | undefined>(initial),
     [busy, setBusy] = useState(false),
     [failure, setFailure] = useState(""),
-    [showSku, setShowSku] = useState(false),
     [entryId, setEntryId] = useState(initial?.data.products[0]?.id || ""),
     [scope, setScope] = useState("common"),
     [validation, setValidation] = useState<
@@ -158,54 +157,54 @@ function ListingEditor({
     available = accounts.filter(
       (a) => a.marketplace === platform && a.status === "active",
     ),
-    products = skus.filter((s) => s.category === category),
+    versions = versionsFor(templates, platform, category),
     entry = data.products.find((p) => p.id === entryId) || data.products[0],
-    product = skus.find((s) => s.id === entry?.globalSkuId);
+    product = skus.find((s) => s.id === entry?.globalSkuId),
+    nameField = template?.fields.find((f) =>
+      /^(product name|model name)$/i.test(f.label),
+    ),
+    skuField = template?.fields.find((f) =>
+      /^(seller sku id|sku id|sku)$/i.test(f.label),
+    );
+  function rowTitle(p: ProductEntry) {
+    return (
+      String((nameField && p.values[nameField.id]) || "").trim() ||
+      skus.find((s) => s.id === p.globalSkuId)?.name ||
+      "Untitled product"
+    );
+  }
+  function rowSubtitle(p: ProductEntry) {
+    return (
+      String((skuField && p.values[skuField.id]) || "").trim() ||
+      skus.find((s) => s.id === p.globalSkuId)?.sku ||
+      "SKU not set"
+    );
+  }
   function invalidate() {
     setValidation(null);
     setFailure("");
     setExports([]);
   }
-  function changeTemplate(p: Marketplace, c: Category, v: string) {
+  function changeTemplate(p: Marketplace, c: Category, v?: string) {
+    const options = versionsFor(templates, p, c);
     setPlatform(p);
     setCategory(c);
-    setVersion(v);
+    setVersion(v && options.includes(v) ? v : options[0]);
     setData({ accountIds: [], products: [] });
     setSaved(undefined);
     invalidate();
   }
-  function toggleProduct(sku: Sku, checked: boolean) {
+  function defaultRow(): ProductEntry {
+    const values: Values = {};
+    for (const f of template?.fields || [])
+      if (f.default) values[f.id] = f.default;
+    return { id: crypto.randomUUID(), values, overrides: {} };
+  }
+  function addRow(row: ProductEntry) {
     invalidate();
-    if (checked) {
-      const values: Values = {};
-      for (const f of template?.fields || []) {
-        if (/^product name$/i.test(f.label)) values[f.id] = sku.name;
-        else if (/description/i.test(f.label)) values[f.id] = sku.description;
-        else if (/supplier.*sku|sku.*id|^sku$/i.test(f.label))
-          values[f.id] = sku.sku;
-        else if (/image/i.test(f.label))
-          values[f.id] =
-            sku.images[
-              /^Other Image URL/i.test(f.label)
-                ? Number(f.label.match(/\d+/)?.[0] || 1)
-                : Number(f.label.match(/\d+/)?.[0] || 1) - 1
-            ] || "";
-        else if (sku.attributes[f.id] !== undefined)
-          values[f.id] = sku.attributes[f.id];
-      }
-      const p = {
-        id: crypto.randomUUID(),
-        globalSkuId: sku.id,
-        values,
-        overrides: {},
-      };
-      setData((d) => ({ ...d, products: [...d.products, p] }));
-      setEntryId(p.id);
-    } else
-      setData((d) => ({
-        ...d,
-        products: d.products.filter((p) => p.globalSkuId !== sku.id),
-      }));
+    setData((d) => ({ ...d, products: [...d.products, row] }));
+    setEntryId(row.id);
+    setScope("common");
   }
   function updateEntry(fn: (p: ProductEntry) => ProductEntry) {
     if (!entry) return;
@@ -265,7 +264,7 @@ function ListingEditor({
     try {
       const response = await api.post("/workspace/validate", payload());
       setValidation(response.data.data.accounts);
-      setStep(4);
+      setStep(3);
     } catch (e) {
       setFailure(errorMessage(e));
     } finally {
@@ -302,9 +301,7 @@ function ListingEditor({
       ? template?.status === "ready"
       : step === 1
         ? data.accountIds.length > 0
-        : step === 2
-          ? data.products.length > 0
-          : true;
+        : true;
   return (
     <>
       <PageHeading
@@ -384,9 +381,7 @@ function ListingEditor({
                   id="listing-marketplace"
                   label="Marketplace"
                   value={platform}
-                  onChange={(v) =>
-                    changeTemplate(v as Marketplace, category, "v1")
-                  }
+                  onChange={(v) => changeTemplate(v as Marketplace, category)}
                   options={Object.entries(marketplaces).map(
                     ([value, label]) => ({ value, label }),
                   )}
@@ -395,9 +390,7 @@ function ListingEditor({
                   id="listing-category"
                   label="Product category"
                   value={category}
-                  onChange={(v) =>
-                    changeTemplate(platform, v as Category, "v1")
-                  }
+                  onChange={(v) => changeTemplate(platform, v as Category)}
                   options={Object.entries(categories).map(([value, label]) => ({
                     value,
                     label,
@@ -408,10 +401,10 @@ function ListingEditor({
                   label="Template version"
                   value={version}
                   onChange={(v) => changeTemplate(platform, category, v)}
-                  options={[
-                    { value: "v1", label: "Version 1" },
-                    { value: "v2", label: "Version 2" },
-                  ]}
+                  options={versions.map((v) => ({
+                    value: v,
+                    label: `Version ${v.slice(1)}`,
+                  }))}
                 />
               </div>
               {template?.status === "ready" ? (
@@ -427,7 +420,9 @@ function ListingEditor({
                       {template.fields.filter((f) => f.required).length}{" "}
                       required ·{" "}
                       {template.fields.filter((f) => f.options.length).length}{" "}
-                      template dropdowns
+                      template dropdowns ·{" "}
+                      {template.fields.filter((f) => f.default).length}{" "}
+                      prefilled defaults
                     </p>
                     <small>
                       Original worksheet: {template.sheetName} · Up to 50 export
@@ -541,72 +536,7 @@ function ListingEditor({
           </CardContent>
         </Card>
       )}
-      {step === 2 && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle>Select your products</CardTitle>
-              <CardDescription>
-                {categories[category]} from your global catalog.{" "}
-                {data.products.length} selected.
-              </CardDescription>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowSku(true)}
-            >
-              <Plus data-icon="inline-start" />
-              Create SKU
-            </Button>
-          </CardHeader>
-          <CardContent>
-            {products.length ? (
-              <FieldGroup>
-                {products.map((s) => (
-                  <Field
-                    key={s.id}
-                    orientation="horizontal"
-                    className="selection-row"
-                  >
-                    <Checkbox
-                      id={`product-${s.id}`}
-                      checked={data.products.some(
-                        (p) => p.globalSkuId === s.id,
-                      )}
-                      disabled={
-                        data.products.length >= 50 &&
-                        !data.products.some((p) => p.globalSkuId === s.id)
-                      }
-                      onCheckedChange={(v) => toggleProduct(s, !!v)}
-                    />
-                    <div>
-                      <FieldLabel htmlFor={`product-${s.id}`}>
-                        {s.name}
-                      </FieldLabel>
-                      <FieldDescription>
-                        {s.sku} · {s.images.length} images
-                      </FieldDescription>
-                    </div>
-                    <Badge variant="outline">{categories[s.category]}</Badge>
-                  </Field>
-                ))}
-              </FieldGroup>
-            ) : (
-              <EmptyState
-                title="Your catalog is waiting for you"
-                description={`Create a global SKU in ${categories[category].toLowerCase()} to use this template.`}
-                action={
-                  <Button variant="outline" onClick={() => setShowSku(true)}>
-                    Create a global SKU
-                  </Button>
-                }
-              />
-            )}
-          </CardContent>
-        </Card>
-      )}
-      {step === 3 && entry && template && (
+      {step === 2 && entry && template && (
         <div className="listing-detail-layout">
           <Card className="listing-products">
             <CardHeader>
@@ -630,34 +560,34 @@ function ListingEditor({
                     }}
                   >
                     <span>{String(i + 1).padStart(2, "0")}</span>
-                    <div>
-                      <strong>
-                        {skus.find((s) => s.id === p.globalSkuId)?.name ||
-                          "Product"}
-                      </strong>
-                      <small>
-                        {skus.find((s) => s.id === p.globalSkuId)?.sku}
-                      </small>
+                    <div className="min-w-0">
+                      <strong className="block truncate">{rowTitle(p)}</strong>
+                      <small className="block truncate">{rowSubtitle(p)}</small>
                     </div>
                   </button>
                 ))}
                 <Separator />
                 <Button
+                  size="sm"
+                  disabled={data.products.length >= 50}
+                  onClick={() => addRow(defaultRow())}
+                >
+                  <Plus data-icon="inline-start" />
+                  Add product row
+                </Button>
+                <Button
                   variant="outline"
                   size="sm"
                   disabled={data.products.length >= 50}
-                  onClick={() => {
-                    const p = {
+                  onClick={() =>
+                    addRow({
                       ...structuredClone(entry),
                       id: crypto.randomUUID(),
-                    };
-                    setData((d) => ({ ...d, products: [...d.products, p] }));
-                    setEntryId(p.id);
-                    invalidate();
-                  }}
+                    })
+                  }
                 >
                   <Copy data-icon="inline-start" />
-                  Duplicate as variant
+                  Duplicate this row
                 </Button>
                 <Button
                   variant="ghost"
@@ -679,11 +609,11 @@ function ListingEditor({
           </Card>
           <Card className="min-w-0">
             <CardHeader>
-              <CardTitle>{product?.name || "Product details"}</CardTitle>
+              <CardTitle>{rowTitle(entry)}</CardTitle>
               <CardDescription>
-                Use the common tab for shared listing details. Account tabs
-                override only the fields you change. Duplicated variants export
-                as separate rows using this template&apos;s Variation field.
+                Every field starts with the default from your filled template.
+                Fill the per-product fields, change anything else you need, and
+                use account tabs to override values for a single account.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -708,41 +638,43 @@ function ListingEditor({
                 </TabsContent>
                 {data.accountIds.map((id) => (
                   <TabsContent key={id} value={id}>
-                    <div className="mb-5">
-                      <SelectField
-                        id={`mapping-${id}`}
-                        label="Account SKU mapping"
-                        value={entry.overrides[id]?.mappingId || "__global"}
-                        onChange={(v) =>
-                          updateEntry((p) => ({
-                            ...p,
-                            overrides: {
-                              ...p.overrides,
-                              [id]: {
-                                values: p.overrides[id]?.values || {},
-                                ...(v === "__global" ? {} : { mappingId: v }),
+                    {entry.globalSkuId && (
+                      <div className="mb-5">
+                        <SelectField
+                          id={`mapping-${id}`}
+                          label="Account SKU mapping"
+                          value={entry.overrides[id]?.mappingId || "__global"}
+                          onChange={(v) =>
+                            updateEntry((p) => ({
+                              ...p,
+                              overrides: {
+                                ...p.overrides,
+                                [id]: {
+                                  values: p.overrides[id]?.values || {},
+                                  ...(v === "__global" ? {} : { mappingId: v }),
+                                },
                               },
+                            }))
+                          }
+                          options={[
+                            {
+                              value: "__global",
+                              label: `Use global SKU — ${product?.sku}`,
                             },
-                          }))
-                        }
-                        options={[
-                          {
-                            value: "__global",
-                            label: `Use global SKU — ${product?.sku}`,
-                          },
-                          ...mappings
-                            .filter(
-                              (m) =>
-                                m.account_id === id &&
-                                m.global_sku_id === entry.globalSkuId,
-                            )
-                            .map((m) => ({
-                              value: m.id,
-                              label: m.account_sku,
-                            })),
-                        ]}
-                      />
-                    </div>
+                            ...mappings
+                              .filter(
+                                (m) =>
+                                  m.account_id === id &&
+                                  m.global_sku_id === entry.globalSkuId,
+                              )
+                              .map((m) => ({
+                                value: m.id,
+                                label: m.account_sku,
+                              })),
+                          ]}
+                        />
+                      </div>
+                    )}
                     <SchemaFields
                       fields={template.fields}
                       values={entry.overrides[id]?.values || {}}
@@ -757,7 +689,7 @@ function ListingEditor({
           </Card>
         </div>
       )}
-      {step === 4 && (
+      {step === 3 && (
         <Card>
           <CardHeader>
             <CardTitle>Review before you export</CardTitle>
@@ -857,10 +789,11 @@ function ListingEditor({
             ? `Saved draft · Revision ${saved.revision}`
             : "Drafts are securely saved to your workspace."}
         </span>
-        {step < 3 ? (
+        {step < 2 ? (
           <Button
             disabled={!canContinue || busy}
             onClick={() => {
+              if (step === 1 && !data.products.length) addRow(defaultRow());
               setStep((s) => s + 1);
               setFailure("");
             }}
@@ -868,7 +801,7 @@ function ListingEditor({
             Continue
             <ArrowRight data-icon="inline-end" />
           </Button>
-        ) : step === 3 ? (
+        ) : step === 2 ? (
           <Button disabled={busy} onClick={() => void validate()}>
             Validate listing
             <Check data-icon="inline-end" />
@@ -893,17 +826,10 @@ function ListingEditor({
         )}
       </div>
       <p className="section-note">
-        Export changes only writable product cells in the original workbook.
-        Template formatting, system columns, formulas, and validation metadata
-        stay intact. Marketplace acceptance must be verified separately.
+        Export opens your original template and replaces only the product cell
+        values. Formatting, system columns, formulas, dropdowns, and other
+        sheets stay exactly as they were.
       </p>
-      {showSku && (
-        <SkuEditor
-          open
-          initialCategory={category}
-          onClose={() => setShowSku(false)}
-        />
-      )}
       <Dialog open={showDrafts} onOpenChange={setShowDrafts}>
         <DialogContent>
           <DialogHeader>

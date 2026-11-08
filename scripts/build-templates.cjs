@@ -23,10 +23,13 @@ const array = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]);
       marketplace = match[2],
       version = match[3],
       key = `${marketplace}:${category}:${version}`;
-    if (bytes[key]) throw new Error(`Duplicate template version: ${key}`);
     const flipkart = marketplace === "flipkart";
     const buffer = fs.readFileSync(path.join("data", file)),
       hash = crypto.createHash("sha256").update(buffer).digest("hex");
+    if (bytes[key]) {
+      if (entries.find((e) => e.key === key)?.templateHash === hash) continue;
+      throw new Error(`Conflicting template files for ${key}: ${file}`);
+    }
     const wb = XLSX.read(buffer, { cellStyles: true, cellFormula: true }),
       sheetName = flipkart
         ? {
@@ -154,6 +157,31 @@ const array = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]);
         : /price|^mrp$|weight|length|width|height|discount|inventory|quantity|net quantity|number of/i.test(
             label,
           );
+      if (/^seller sku id$/i.test(label)) choices = [];
+      const lastDataRow = flipkart
+        ? XLSX.utils.decode_range(sheet["!ref"]).e.r
+        : 303;
+      let formula = false;
+      for (let r = 4; r <= lastDataRow && !formula; r++)
+        if (sheet[XLSX.utils.encode_cell({ r, c })]?.f) formula = true;
+      const sample = sheet[column + "5"];
+      const sampleText =
+        sample && !sample.f && sample.v !== undefined
+          ? String(sample.v).trim()
+          : "";
+      const dynamic = /^dynamic\b/i.test(sampleText);
+      const normalize = (value) =>
+        choices.find((o) => o === value) ||
+        choices.find((o) => o.toLowerCase() === value.toLowerCase()) ||
+        value;
+      const defaultValue =
+        dynamic || !sampleText
+          ? ""
+          : choices.length
+            ? (multiValue ? sampleText.split("::") : [sampleText])
+                .map((v) => normalize(v.trim()))
+                .join("::")
+            : sampleText;
       const type =
         choices.length && !multiValue
           ? "select"
@@ -202,6 +230,9 @@ const array = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]);
           : {}),
         type,
         options: choices,
+        default: defaultValue,
+        dynamic,
+        formula,
         group: /price|mrp|gst|hsn|discount/i.test(label)
           ? "Pricing & tax"
           : /image|url/i.test(label)
@@ -234,7 +265,6 @@ const array = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]);
                     "This supplied workbook uses Flipkart’s ring worksheet and has no MRP, selling-price, or stock columns. The export preserves that catalogue-only structure.",
                   ]
                 : []),
-              "The supplied workbook restricts Seller SKU ID to the dropdown value ‘Individual FSN’. Other catalog or account SKU values will fail validation. Supply a corrected XLSX before exporting custom seller SKUs.",
               "Purple fields are conditionally mandatory. Review the original template guidance for your product; category-specific conditional rules and marketplace acceptance are not certified.",
             ],
           }

@@ -12,6 +12,7 @@ const bytes = require("../bulk-listing/template-bytes.json");
 function validRow(template) {
   const row = {};
   for (const f of template.fields) {
+    if (f.formula) continue;
     row[f.id] = f.options.length
       ? f.options[0]
       : f.type === "number"
@@ -33,9 +34,24 @@ for (const template of registry.filter((t) => t.status === "ready"))
         Buffer.from(bytes[template.key], "base64"),
       ),
       result = await JSZip.loadAsync(output);
-    assert.deepEqual(Object.keys(result.files), Object.keys(original.files));
+    const rewritten = new Set([
+      template.worksheetPath,
+      "xl/sharedStrings.xml",
+      "xl/workbook.xml",
+      "xl/_rels/workbook.xml.rels",
+      "[Content_Types].xml",
+    ]);
+    assert.deepEqual(
+      Object.keys(result.files),
+      Object.keys(original.files).filter((n) => n !== "xl/calcChain.xml"),
+    );
     for (const name of Object.keys(original.files)) {
-      if (original.files[name].dir || name === template.worksheetPath) continue;
+      if (
+        original.files[name].dir ||
+        rewritten.has(name) ||
+        name === "xl/calcChain.xml"
+      )
+        continue;
       assert.ok(
         (await result.file(name).async("nodebuffer")).equals(
           await original.file(name).async("nodebuffer"),
@@ -76,6 +92,7 @@ for (const template of registry.filter((t) => t.status === "ready"))
       sheet = workbook.Sheets[template.sheetName];
     assert.deepEqual(workbook.SheetNames, template.sheetNames);
     for (const f of template.fields) {
+      if (f.formula) continue;
       assert.equal(
         String(sheet[f.column + "5"]?.v ?? ""),
         String(row[f.id] ?? ""),
@@ -173,11 +190,11 @@ for (const template of registry.filter(
         { ...row, [multi.id]: row[multi.id] + "::INVALID" },
       ]).some((e) => e.field === multi.id),
     );
-    assert.deepEqual(sku.options, ["Individual FSN"]);
+    assert.deepEqual(sku.options, []);
     assert.ok(
-      validateRows(template, [{ ...row, [sku.id]: "CUSTOM-ACCOUNT-SKU" }]).some(
-        (e) => e.field === sku.id,
-      ),
+      !validateRows(template, [
+        { ...row, [sku.id]: "CUSTOM-ACCOUNT-SKU" },
+      ]).some((e) => e.field === sku.id),
     );
     const model = template.fields.find((f) => /^Model Number$/i.test(f.label));
     const rows = Array.from({ length: 50 }, (_, i) => ({
@@ -192,7 +209,7 @@ for (const template of registry.filter(
       sheet = workbook.Sheets[template.sheetName];
     assert.equal(sheet[model.column + "5"].v, "MODEL-1");
     assert.equal(sheet[model.column + "54"].v, "MODEL-50");
-    assert.equal(sheet[sku.column + "5"].v, "Individual FSN");
+    assert.equal(sheet[sku.column + "5"].v, row[sku.id]);
     assert.equal(sheet[multi.column + "5"].v, row[multi.id]);
     if (text) {
       assert.equal(sheet[text.column + "5"].v, rows[0][text.id]);
@@ -264,4 +281,44 @@ test("formula-like values remain literal text and XML characters are escaped", a
   const s = XLSX.read(out).Sheets[t.sheetName];
   assert.equal(s[name.column + "5"].v, row[name.id]);
   assert.equal(s[name.column + "5"].f, undefined);
+});
+
+test("template defaults are extracted and dynamic markers are left for each product", () => {
+  for (const t of registry.filter((t) => t.status === "ready")) {
+    assert.ok(
+      t.fields.some((f) => f.default),
+      `${t.key} has defaults`,
+    );
+    for (const f of t.fields) {
+      assert.ok(!/^dynamic/i.test(f.default || ""), `${t.key} ${f.label}`);
+      if (f.dynamic) assert.equal(f.default, "");
+    }
+  }
+});
+test("overwriting a shared-formula master keeps the remaining formulas valid", async () => {
+  const t = registry.find((t) => t.key === "meesho:ring:v1");
+  const discount = t.fields.find((f) => f.column === "G");
+  const rows = [0, 1].map(() => {
+    const row = validRow(t);
+    row[discount.id] = "5";
+    return row;
+  });
+  const output = await generateWorkbook(t.key, rows);
+  const zip = await JSZip.loadAsync(output);
+  assert.equal(zip.file("xl/calcChain.xml"), null);
+  assert.match(
+    await zip.file("xl/workbook.xml").async("string"),
+    /fullCalcOnLoad="1"/,
+  );
+  const xml = await zip.file(t.worksheetPath).async("string");
+  for (const row of xml.match(/<row\b[\s\S]*?<\/row>/g)) {
+    const refs = [...row.matchAll(/<c r="([A-Z]+\d+)"/g)].map((m) => m[1]);
+    assert.equal(new Set(refs).size, refs.length, "duplicate cell");
+  }
+  const sheet = XLSX.read(output, { cellFormula: true }).Sheets[t.sheetName];
+  assert.equal(sheet.G5.v, 5);
+  assert.equal(sheet.G6.v, 5);
+  assert.equal(sheet.G6.f, undefined);
+  assert.match(sheet.G7.f, /F7/);
+  assert.match(sheet.T6.f, /M6/);
 });

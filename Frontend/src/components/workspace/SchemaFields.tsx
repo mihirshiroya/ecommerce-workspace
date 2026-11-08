@@ -28,32 +28,38 @@ export default function SchemaFields({
   prefix: string;
   overrides?: boolean;
 }) {
-  const groups = [...new Set(fields.map((f) => f.group))];
+  const perProduct = "Fill for each product";
+  const groupOf = (f: TemplateField) => (f.dynamic ? perProduct : f.group);
+  const groups = [...new Set(fields.map(groupOf))].sort(
+    (a, b) => Number(b === perProduct) - Number(a === perProduct),
+  );
+  const openGroup = groups.includes(perProduct) ? perProduct : "Pricing & tax";
   return (
     <div className="flex flex-col gap-3">
       {groups.map((group) => (
         <details
           className="schema-group"
           key={group}
-          open={group === "Pricing & tax"}
+          open={group === openGroup}
         >
           <summary>
             <span>{group}</span>
             <Badge variant="outline">
-              {fields.filter((f) => f.group === group && f.required).length}{" "}
-              required
+              {group === perProduct
+                ? `${fields.filter((f) => f.dynamic).length} fields`
+                : `${fields.filter((f) => groupOf(f) === group && f.required).length} required`}
             </Badge>
           </summary>
           <FieldGroup className="schema-fields">
             {fields
-              .filter((f) => f.group === group)
+              .filter((f) => groupOf(f) === group)
               .map((f) => {
                 const id = `${prefix}-${f.id}`;
                 return (
                   <Field key={f.id}>
                     <FieldLabel htmlFor={id}>
                       {f.label}
-                      {f.required && !overrides && (
+                      {f.required && !f.formula && !overrides && (
                         <span className="text-primary">*</span>
                       )}
                       <span className="field-column">{f.column}</span>
@@ -83,7 +89,10 @@ export default function SchemaFields({
                             <SelectItem value="__inherit">
                               {overrides ? "Use common value" : "Not selected"}
                             </SelectItem>
-                            {f.options.map((v) => (
+                            {(f.default && !f.options.includes(f.default)
+                              ? [f.default, ...f.options]
+                              : f.options
+                            ).map((v) => (
                               <SelectItem key={v} value={v}>
                                 {v}
                               </SelectItem>
@@ -146,6 +155,11 @@ export default function SchemaFields({
                           </FieldDescription>
                         )}
                       </>
+                    )}
+                    {f.formula && !overrides && (
+                      <FieldDescription>
+                        Calculated by the template formula when left empty.
+                      </FieldDescription>
                     )}
                     {f.description && (
                       <FieldDescription
