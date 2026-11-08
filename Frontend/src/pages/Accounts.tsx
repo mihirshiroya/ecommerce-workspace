@@ -309,7 +309,7 @@ export default function Accounts() {
                 placeholder={`Enter your ${marketplaces[form.marketplace]} account ID`}
                 description={
                   form.marketplace === "flipkart"
-                    ? "Enter the seller/account ID from Flipkart Seller Hub. This ID is used in your Excel filenames. Use letters, numbers, underscores or hyphens."
+                    ? "Enter the seller/account ID from Flipkart Seller Hub. Choose your Excel filename in the final bulk listing step. Use letters, numbers, underscores or hyphens."
                     : `Enter the seller/account ID from your ${marketplaces[form.marketplace]} seller account, not your login email or password.`
                 }
               />

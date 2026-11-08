@@ -312,6 +312,10 @@ test(
               template_key: template.key,
               data: {
                 accountIds: [accountA.id, accountB.id],
+                exportFilenames: {
+                  [accountA.id]: "Account A listing.xlsx",
+                  [accountB.id]: "Account B listing.xlsx",
+                },
                 products: [product],
               },
             };
@@ -344,6 +348,13 @@ test(
             });
             assert.equal(draft.status, 201);
             const saved = draft.body.data;
+            const reopened = await call("/workspace/drafts/" + saved.id, {
+              token: a,
+            });
+            assert.deepEqual(
+              reopened.body.data.data.exportFilenames,
+              payload.data.exportFilenames,
+            );
             assert.equal(
               (await call("/workspace/drafts/" + saved.id, { token: b }))
                 .status,

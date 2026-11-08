@@ -73,6 +73,7 @@ export interface ProductEntry {
   overrides: Record<string, { mappingId?: string; values: Values }>;
 }
 export interface DraftData {
+  exportFilenames?: Record<string, string>;
   accountIds: string[];
   products: ProductEntry[];
 }

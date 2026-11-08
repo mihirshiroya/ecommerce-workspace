@@ -50,6 +50,8 @@ import {
   ErrorState,
 } from "../components/workspace/Common";
 import SchemaFields from "../components/workspace/SchemaFields";
+import ExportFilenames from "../components/workspace/ExportFilenames";
+import { filenameError } from "../lib/exportFilename";
 import { fetcher, save, errorMessage, downloadFile } from "../api/workspace";
 import api from "../api/config";
 import {
@@ -157,6 +159,14 @@ function ListingEditor({
     available = accounts.filter(
       (a) => a.marketplace === platform && a.status === "active",
     ),
+    selectedAccounts = data.accountIds
+      .map((id) => accounts.find((a) => a.id === id))
+      .filter((a): a is Account => !!a),
+    filenamesInvalid =
+      platform === "flipkart" &&
+      data.accountIds.some(
+        (id) => !!filenameError(data.exportFilenames?.[id] || ""),
+      ),
     versions = versionsFor(templates, platform, category),
     entry = data.products.find((p) => p.id === entryId) || data.products[0],
     product = skus.find((s) => s.id === entry?.globalSkuId),
@@ -272,6 +282,12 @@ function ListingEditor({
     }
   }
   async function exportFiles() {
+    if (filenamesInvalid) {
+      setFailure(
+        "Enter a valid Excel filename for every selected Flipkart account.",
+      );
+      return;
+    }
     setBusy(true);
     setFailure("");
     try {
@@ -715,6 +731,24 @@ function ListingEditor({
                 <strong>{data.accountIds.length} workbooks</strong>
               </div>
             </div>
+            {platform === "flipkart" && (
+              <ExportFilenames
+                accounts={selectedAccounts}
+                filenames={data.exportFilenames || {}}
+                disabled={busy}
+                onChange={(accountId, value) => {
+                  setFailure("");
+                  setExports([]);
+                  setData((current) => ({
+                    ...current,
+                    exportFilenames: {
+                      ...current.exportFilenames,
+                      [accountId]: value,
+                    },
+                  }));
+                }}
+              />
+            )}
             <div className="flex flex-col gap-4 mt-6">
               {validation?.map((v, i) => (
                 <Alert
@@ -812,6 +846,7 @@ function ListingEditor({
               busy ||
               !!validation?.some((v) => v.errors.length) ||
               !validation ||
+              filenamesInvalid ||
               exports.length > 0
             }
             onClick={() => void exportFiles()}

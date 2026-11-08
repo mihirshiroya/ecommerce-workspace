@@ -102,6 +102,7 @@ const fieldValues = z.record(
 );
 const draftData = z.object({
   accountIds: z.array(uuid).min(1).max(5),
+  exportFilenames: z.record(uuid, z.string().trim().max(200)).default({}),
   products: z
     .array(
       z.object({
@@ -665,7 +666,7 @@ router.post("/history/:id/retry", async (req, res) => {
     batch_id: previous.batch_id,
     filename:
       template.marketplace === "flipkart"
-        ? exportFilename(template, account, id)
+        ? previous.filename
         : previous.filename.replace(
             /_[a-f0-9]{8}\.xlsx$/,
             `_${id.slice(0, 8)}.xlsx`,
@@ -701,8 +702,21 @@ router.post("/drafts/:id/export", async (req, res) => {
     fail(422, "Fix the listing validation errors before export.", allErrors);
   const batchId = randomUUID();
   const output = [];
-  for (const f of result.files) {
+  const files = result.files.map((f) => {
     const id = randomUUID();
+    return {
+      ...f,
+      id,
+      filename: exportFilename(
+        result.template,
+        f.account,
+        id,
+        draft.data.exportFilenames?.[f.account.id],
+      ),
+    };
+  });
+  for (const f of files) {
+    const id = f.id;
     output.push(
       await materializeExport({
         id,
@@ -710,7 +724,7 @@ router.post("/drafts/:id/export", async (req, res) => {
         draft_id: draft.id,
         account_id: f.account.id,
         batch_id: batchId,
-        filename: exportFilename(result.template, f.account, id),
+        filename: f.filename,
         template_key: draft.template_key,
         template_hash: result.template.templateHash,
         snapshot: {

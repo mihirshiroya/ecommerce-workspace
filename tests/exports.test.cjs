@@ -1,43 +1,33 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createHash, randomUUID } = require("node:crypto");
-const { materializeExport, exportFilename } = require("../Backend/services/exports");
+const { materializeExport, exportFilename, normalizeExcelFilename } = require("../Backend/services/exports");
 
-test("Flipkart filenames use marketplace slugs, seller ID, IST timestamp and unique request IDs", () => {
+test("Flipkart exports use the user's exact filename for every category", () => {
   const account = { name: "Seller account", seller_id: "64379028e72c46a6" };
-  const now = new Date("2026-11-08T05:27:00Z");
-  for (const [category, slug] of Object.entries({
-    mangalsutra: "mangalsutra-tanmaniya",
-    ring: "ring",
-    pendant: "pendant-locket",
-    earring: "earring",
-    "toe-ring": "toe-ring",
-  })) {
-    const template = { marketplace: "flipkart", category, version: "v1" };
-    const filename = exportFilename(template, account, randomUUID(), now);
-    assert.match(filename, new RegExp(`^C_${slug}_64379028e72c46a6_0811-1057FK_REQ[A-Z0-9]{11}\\.xlsx$`));
-    assert.notEqual(exportFilename(template, account, randomUUID(), now), filename);
+  for (const category of ["mangalsutra", "ring", "pendant", "earring", "toe-ring"]) {
+    const filename = `My ${category} batch (1).xlsx`;
+    assert.equal(
+      exportFilename({ marketplace: "flipkart", category }, account, randomUUID(), filename),
+      filename,
+    );
   }
 });
 
-test("Flipkart timestamps roll over at midnight in India", () => {
-  assert.match(
-    exportFilename(
-      { marketplace: "flipkart", category: "ring" },
-      { name: "Seller", seller_id: "seller123" },
-      randomUUID(),
-      new Date("2026-11-08T18:30:00Z"),
-    ),
-    /_0911-0000FK_REQ/,
-  );
+test("filenames are trimmed, gain .xlsx when missing, and keep existing extension case", () => {
+  assert.equal(normalizeExcelFilename("  My batch  "), "My batch.xlsx");
+  assert.equal(normalizeExcelFilename("My batch.XLSX"), "My batch.XLSX");
+  assert.equal(normalizeExcelFilename("a".repeat(195)), `${"a".repeat(195)}.xlsx`);
 });
 
-test("Flipkart exports require a safe seller ID rather than silently using account names", () => {
-  for (const seller_id of ["", "../seller", 'seller"\r\n'])
+test("Flipkart filenames are required and unsafe filenames are rejected", () => {
+  for (const name of [undefined, "", "  ", ".xlsx", "../file.xlsx", "folder/file.xlsx", "folder\\file.xlsx", 'file".xlsx', "file\r\n.xlsx", "file?.xlsx", "CON.xlsx", "a".repeat(196), "file.xlsx.xlsx", "file.exe.xlsx", "name..xlsx", "name.xls", "name.csv", "é.xlsx"]) {
     assert.throws(
-      () => exportFilename({ marketplace: "flipkart", category: "ring" }, { name: "Seller", seller_id }, randomUUID()),
+      () => exportFilename({ marketplace: "flipkart" }, { name: "My account" }, randomUUID(), name),
       { status: 422 },
+      String(name),
     );
+  }
 });
 
 test("Meesho filenames retain their existing format", () => {
@@ -76,11 +66,13 @@ test("production exports retain exact workbook bytes in database records without
   const record = {
     id: randomUUID(),
     user_id: "export-test",
+    filename: "My saved workbook.xlsx",
     template_key: template.key,
     snapshot: { rows: [row] },
   };
   const result = await materializeExport(record);
   assert.equal(result.status, "completed");
+  assert.equal(result.filename, record.filename);
   assert.deepEqual(result.snapshot, record.snapshot);
   const bytes = Buffer.from(result.file_base64, "base64");
   assert.equal(bytes.subarray(0, 2).toString(), "PK");
@@ -95,10 +87,12 @@ test("workbook generation failures retain their snapshot for account-specific re
   const record = {
     id: randomUUID(),
     template_key: "missing:template:v1",
+    filename: "My retry filename.xlsx",
     snapshot: { rows: [] },
   };
   const result = await materializeExport(record);
   assert.equal(result.status, "failed");
+  assert.equal(result.filename, record.filename);
   assert.equal(result.file_base64, null);
   assert.equal(result.size, 0);
   assert.deepEqual(result.snapshot.rows, record.snapshot.rows);

@@ -1,37 +1,36 @@
-const { createHash, randomInt } = require("node:crypto");
+const { createHash } = require("node:crypto");
 const { generateWorkbook } = require("./workbooks");
 
-function exportFilename(template, account, id, now = new Date()) {
-  if (template.marketplace !== "flipkart")
-    return `${account.name.replace(/[^a-zA-Z0-9_-]/g, "_")}_${template.category}_${template.version}_${id.slice(0, 8)}.xlsx`;
-
-  const sellerId = String(account.seller_id || "").trim();
-  if (!/^[a-zA-Z0-9_-]+$/.test(sellerId)) {
+function normalizeExcelFilename(value) {
+  const name = typeof value === "string" ? value.trim() : "";
+  const stem = name.replace(/\.xlsx$/i, "");
+  const filename = /\.xlsx$/i.test(name) ? name : `${name}.xlsx`;
+  if (
+    !stem ||
+    /[^\x20-\x7E]|[<>:"/\\|?*]/.test(name) ||
+    /^[. ]|[. ]$/.test(stem) ||
+    /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(stem) ||
+    /\.(xlsx|xls|xlsm|csv|exe)$/i.test(stem) ||
+    filename.length > 200
+  ) {
     const error = new Error(
-      `Set a valid seller ID for ${account.name} before exporting to Flipkart. Use only letters, numbers, underscores or hyphens.`,
+      "Enter an Excel filename (up to 200 characters including .xlsx). Use English letters, numbers, spaces, hyphens, underscores, dots or parentheses; do not use paths or special filename characters.",
     );
     error.status = 422;
     throw error;
   }
-  const slug = {
-    mangalsutra: "mangalsutra-tanmaniya",
-    pendant: "pendant-locket",
-  }[template.category] || template.category;
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-GB", {
-      timeZone: "Asia/Kolkata",
-      day: "2-digit",
-      month: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    }).formatToParts(now).map(({ type, value }) => [type, value]),
-  );
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  const requestId = Array.from({ length: 11 }, () =>
-    alphabet[randomInt(alphabet.length)],
-  ).join("");
-  return `C_${slug}_${sellerId}_${parts.day}${parts.month}-${parts.hour}${parts.minute}FK_REQ${requestId}.xlsx`;
+  return filename;
+}
+
+function exportFilename(template, account, id, requestedFilename) {
+  if (template.marketplace !== "flipkart")
+    return `${account.name.replace(/[^a-zA-Z0-9_-]/g, "_")}_${template.category}_${template.version}_${id.slice(0, 8)}.xlsx`;
+  try {
+    return normalizeExcelFilename(requestedFilename);
+  } catch (error) {
+    error.message = `${account.name}: ${error.message}`;
+    throw error;
+  }
 }
 
 async function materializeExport(record) {
@@ -67,4 +66,4 @@ async function materializeExport(record) {
   }
 }
 
-module.exports = { materializeExport, exportFilename };
+module.exports = { materializeExport, exportFilename, normalizeExcelFilename };
